@@ -1,0 +1,9 @@
+DYAMS MÓVIL - app Android (APK) y iPhone (IPA)
+© IRONLEAF SOFTWARE. Todos los derechos reservados.
+
+Descarga: pestaña "Releases".
+- Android: DYAMS-Movil.apk (permitir "instalar apps de origen desconocido").
+- iPhone: DYAMS-Movil.ipa (sin firmar; se instala con Sideloadly o AltStore).
+
+La app funciona solo con DYAMS ERP instalado en la computadora del negocio.
+Este repositorio contiene únicamente la versión compilada que se usa para armar las apps.

@@ -1,0 +1,97 @@
+name: Compilar iPhone
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'www/**'
+      - 'iconos-ios/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - '.github/workflows/build-ios.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        # Todo lo que imprime cada paso queda también en registro-ios.txt (se sube a la rama registro-ios).
+        shell: bash -eo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          npm install
+      - run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          npx cap add ios
+
+      # Ícono de DYAMS ERP (iOS pide uno solo de 1024 sin transparencia y redondea las esquinas).
+      - name: Ícono de la app
+        run: cp iconos-ios/AppIcon-1024.png ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+
+      # Cámara para el escáner y conexión HTTP con la Caja 0 por el wifi del negocio.
+      - name: Permisos de cámara y red local
+        run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          PLIST=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Para escanear códigos de barras y tomar las fotos de los productos.'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Para conectarse con la Caja 0 por el wifi del negocio.'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST"
+
+      - run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          npx cap sync ios
+
+      # Se compila sin firmar: la firma la pone quien la instala (Sideloadly/AltStore con su Apple ID,
+      # o una cuenta de Apple Developer para TestFlight).
+      - name: Compilar
+        run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry DYAMS-Movil.ipa Payload
+          ls -lh DYAMS-Movil.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dyams-movil-iphone
+          path: DYAMS-Movil.ipa
+
+      - name: Publicar para descargar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/registro-ios.txt") 2>&1
+          gh release delete iphone-ultima --yes --cleanup-tag || true
+          gh release create iphone-ultima DYAMS-Movil.ipa \
+            --target "${{ github.sha }}" \
+            --title "DYAMS Móvil para iPhone (última versión)" \
+            --notes "IPA sin firmar generado desde el commit ${{ github.sha }}. Se instala con Sideloadly o AltStore usando un Apple ID (ver LEEME.txt)."
+
+      # Siempre (también si falló): el registro se sube a la rama registro-ios para poder leerlo con git.
+      - name: Guardar registro
+        if: always()
+        run: |
+          cp "$GITHUB_WORKSPACE/registro-ios.txt" /tmp/registro-ios.txt 2>/dev/null || echo "sin registro" > /tmp/registro-ios.txt
+          echo "Resultado del trabajo: ${{ job.status }} (commit ${{ github.sha }})" >> /tmp/registro-ios.txt
+          cd "$RUNNER_TEMP"
+          git init -q registro && cd registro
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          cp /tmp/registro-ios.txt .
+          git add registro-ios.txt
+          git commit -q -m "Registro de la compilación de iPhone"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:refs/heads/registro-ios

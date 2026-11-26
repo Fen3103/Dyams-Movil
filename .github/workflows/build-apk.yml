@@ -1,0 +1,64 @@
+name: Compilar APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm install
+      - run: npx cap add android
+
+      # Permiso de cámara para el escáner de códigos y las fotos de productos. Lo de <queries> deja que
+      # "Abrir la cámara del celular" encuentre la app de cámara en Android 11+ (si no, abre la galería).
+      - name: Permiso de cámara
+        run: |
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <queries>\n        <intent>\n            <action android:name="android.media.action.IMAGE_CAPTURE" />\n        </intent>\n    </queries>\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          grep -n "CAMERA\|IMAGE_CAPTURE" android/app/src/main/AndroidManifest.xml
+
+      # La Caja 0 atiende por la red local (wifi del negocio) con HTTP: Android lo bloquea si no se permite.
+      - name: Permitir la conexión con la Caja 0 en la red local
+        run: |
+          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml
+          grep -n "usesCleartextTraffic" android/app/src/main/AndroidManifest.xml
+
+      # Ícono de DYAMS ERP (la D con "ERP" debajo) en todas las densidades.
+      - name: Ícono de la app
+        run: |
+          cp -r iconos-android/mipmap-* android/app/src/main/res/
+          sed -i 's#<color name="ic_launcher_background">[^<]*</color>#<color name="ic_launcher_background">\#1E3A8A</color>#' android/app/src/main/res/values/ic_launcher_background.xml
+          cat android/app/src/main/res/values/ic_launcher_background.xml
+
+      - run: npx cap sync android
+      - run: ./gradlew assembleDebug
+        working-directory: android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dyams-movil-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # Deja el APK como descarga directa en "Releases" (se reemplaza en cada versión).
+      - name: Publicar APK para descargar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk DYAMS-Movil.apk
+          gh release delete movil-ultima --yes --cleanup-tag || true
+          gh release create movil-ultima DYAMS-Movil.apk \
+            --target "${{ github.sha }}" \
+            --title "DYAMS Móvil (última versión)" \
+            --notes "APK de prueba generado automáticamente desde el commit ${{ github.sha }}. Descarga DYAMS-Movil.apk en el celular e instálalo (hay que permitir instalar apps de origen desconocido)."

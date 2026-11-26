@@ -1,0 +1,8 @@
+{
+  "appId": "cr.silex.movil",
+  "appName": "DYAMS Móvil",
+  "webDir": "www",
+  "backgroundColor": "#1E3A8A",
+  "server": { "androidScheme": "https" },
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
